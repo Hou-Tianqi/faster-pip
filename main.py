@@ -29,28 +29,6 @@ def timer(unit='ms'):
         return wrapper
     return decorator
 
-'''
-def write_log(th):
-    with open("log.log","a",encoding="utf-8")  as f:
-        f.write(th+"\n")
-
-def read_log():
-    with open("log.log",encoding="utf-8") as f:
-        return f.read()
-
-
-def log(func):
-    @wraps(func)
-    def wrapper(*args,**kwargs):
-        try:
-            res = func(*args,**kwargs)
-            write_log(f"[INFO][{func.__module__}/{func.__name__}]-result :  {res}")
-            return res
-        except Exception as e:
-            write_log(f"[ERROR][{func.__module__}/{func.__name__}]-Exception :  {e}")
-            return e
-    return wrapper
-'''
 
 def run(command):
     res = sub.run(command,check=True,capture_output=True,timeout=4,encoding="utf-8",shell=True)
@@ -61,9 +39,30 @@ if __name__ == "__main__":
     wh_pip = run("where pip").strip().split("\n")
     if len(wh_py) == 1:
         print("发现1个Python版本")
-        print(f"版本号：{run(str(wh_py[0] --version))}")
+        print(f"版本号：{run(str(wh_py[0])+' --version').strip()}")
     elif len(wh_py) == 0:
         print("OoO? 未发现Python")
     else:
         print(f"OoO? 发现多个Python版本，{len(wh_py)}个")
+        print(f"路径：")
+        for i in range(len(wh_py)):
+            print('第',i+1,'个：',wh_py[i])
+        for i in range(len(wh_py)):
+            try:
+                print(f'第{i+1}个，版本号：{run(str(wh_py[i])+" --version").strip()}')
+            except:
+                print(f'第{i+1}个，无效的python，建议清理')
+
+    print("\n")
+
+    if len(wh_pip) == 1:
+        print("发现1个pip版本")
+        print('路径：',wh_pip[0])
+    elif len(wh_pip) == 0:
+        print("OoO? 未发现pip")
+    else:
+        print(f"OoO? 发现多个pip版本，{len(wh_pip)}个")
+        print(f"路径：")
+        for i in range(len(wh_pip)):
+            print('第',i+1,'个：',wh_pip[i])
     
