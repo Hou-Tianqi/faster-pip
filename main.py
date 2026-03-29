@@ -95,6 +95,8 @@ if __name__ == "__main__":
             except:
                 print(f'第{i+1}个，无效的python，建议清理')
 
+    print()
+
     if len(wh_pip) == 1:
         print("发现1个pip版本")
         print('路径：',wh_pip[0])
