@@ -79,6 +79,8 @@ def pip_find(pkg):
 if __name__ == "__main__":
     wh_py = run("where python").strip().split("\n")
     wh_pip = run("where pip").strip().split("\n")
+    path = run("echo %PATH%").strip().split(";")
+
     if len(wh_py) == 1:
         print("发现1个Python版本")
         print(f"版本号：{run(str(wh_py[0])+' --version').strip()}")
