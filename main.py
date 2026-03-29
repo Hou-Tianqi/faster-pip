@@ -32,15 +32,19 @@ def timer(unit='ms'):
 
 pip_path = None
 
-def run(command):
-    res = sub.run(command,check=True,capture_output=True,timeout=4,encoding="utf-8",shell=True)
-    return res.stdout
+def run(command, timeout=300):
+    try:
+        res = sub.run(command, check=True, capture_output=True, timeout=timeout, encoding="utf-8", shell=True)
+        return res.stdout
+    except sub.TimeoutExpired:
+        print(f"命令超时（{timeout}s）：{command}")
+        raise
+
 
 def pip_run(sub_cmd):
-    if pip_path:
-        # 适配多个 pip 路径
-        return run(f'"{pip_path}" {sub_cmd}')
-    return run(f"python -m pip {sub_cmd}")
+    cmd = f'"{pip_path}" {sub_cmd}' if pip_path else f"python -m pip {sub_cmd}"
+    # pip 安装可能较慢，默认给大些时间
+    return run(cmd, timeout=600)
 
 def pip_list():
     print(pip_run('list'))
