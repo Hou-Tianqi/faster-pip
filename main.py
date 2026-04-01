@@ -1,6 +1,7 @@
 import subprocess as sub
 from functools import wraps
 import time
+import os
 
 
 def timer(unit='ms'):
@@ -81,6 +82,48 @@ def pip_find(pkg):
         print(f"{pkg} 已安装, 版本未知")
 
 if __name__ == "__main__":
+    # 检测系统环境变量 PATH
+    path_str = os.environ.get('PATH', '')
+    path_dirs = [p.strip() for p in path_str.split(';') if p.strip()]
+    has_python_in_path = any('python' in p.lower() for p in path_dirs)
+    has_pip_in_path = any('scripts' in p.lower() for p in path_dirs)
+
+    if not has_python_in_path:
+        print("PATH 中未找到 Python")
+        try:
+            py_paths = run("where python").strip().split("\n")
+            if py_paths and py_paths[0].strip():
+                py_path = py_paths[0].strip()
+                print(f"找到 Python 路径: {py_path}")
+                add_py = input("是否添加此路径到 PATH? (y/n): ").strip().lower()
+                if add_py == 'y':
+                    py_dir = os.path.dirname(py_path)
+                    try:
+                        sub.run(f'setx PATH "%PATH%;{py_dir}"', shell=True, check=True)
+                        print("已添加 Python 到 PATH，请重启终端以生效")
+                    except sub.CalledProcessError:
+                        print("添加失败，请手动添加或以管理员身份运行")
+        except Exception:
+            print("未找到 Python 可执行文件")
+
+    if not has_pip_in_path:
+        print("PATH 中未找到 pip")
+        try:
+            pip_paths = run("where pip").strip().split("\n")
+            if pip_paths and pip_paths[0].strip():
+                pip_path_found = pip_paths[0].strip()
+                print(f"找到 pip 路径: {pip_path_found}")
+                add_pip = input("是否添加此路径到 PATH? (y/n): ").strip().lower()
+                if add_pip == 'y':
+                    pip_dir = os.path.dirname(pip_path_found)
+                    try:
+                        sub.run(f'setx PATH "%PATH%;{pip_dir}"', shell=True, check=True)
+                        print("已添加 pip 到 PATH，请重启终端以生效")
+                    except sub.CalledProcessError:
+                        print("添加失败，请手动添加或以管理员身份运行")
+        except Exception:
+            print("未找到 pip 可执行文件")
+
     wh_py = run("where python").strip().split("\n")
     wh_pip = run("where pip").strip().split("\n")
     path = run("echo %PATH%").strip().split(";")
