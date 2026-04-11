@@ -81,7 +81,71 @@ def pip_find(pkg):
     else:
         print(f"{pkg} 已安装, 版本未知")
 
+
+def pip_installed_packages():
+    output = pip_run('list --format=freeze')
+    packages = []
+    for line in output.splitlines():
+        if '==' in line:
+            packages.append(line.split('==', 1)[0].strip())
+    return packages
+
+
+def pip_requires(pkg):
+    try:
+        info = pip_run(f'show {pkg}')
+    except Exception:
+        return []
+    for line in info.splitlines():
+        if line.startswith('Requires:'):
+            deps = line.split(':', 1)[1].strip()
+            return [dep.split(' ')[0].strip() for dep in deps.split(',') if dep.strip()]
+    return []
+
+
+def pip_uninstall_with_deps(pkg, auto_remove=False):
+    deps = pip_requires(pkg)
+    pip_uninstall(pkg)
+    if not deps:
+        return
+
+    packages = pip_installed_packages()
+    if not packages:
+        return
+
+    requires = {name: pip_requires(name) for name in packages}
+    dependents = {name: set() for name in packages}
+    for name, subdeps in requires.items():
+        for dep in subdeps:
+            if dep in dependents:
+                dependents[dep].add(name)
+
+    keep = {'pip', 'setuptools', 'wheel'}
+    orphan_deps = [dep for dep in deps if dep in dependents and not dependents[dep] and dep.lower() not in keep]
+    if not orphan_deps:
+        return
+
+    print('检测到以下依赖库在卸载目标后未被其他包依赖：')
+    for dep in orphan_deps:
+        print(' -', dep)
+    if auto_remove:
+        print('正在卸载依赖库...')
+        pip_uninstall(' '.join(orphan_deps))
+        print('依赖库卸载完成')
+        return
+
+    confirm = input('是否同时卸载这些依赖库? (y/n): ').strip().lower()
+    if confirm != 'y':
+        print('保留依赖库')
+        return
+
+    print('正在卸载依赖库...')
+    pip_uninstall(' '.join(orphan_deps))
+    print('依赖库卸载完成')
+
+
 if __name__ == "__main__":
+
     # 检测系统环境变量 PATH
     path_str = os.environ.get('PATH', '')
     path_dirs = [p.strip() for p in path_str.split(';') if p.strip()]
@@ -188,7 +252,11 @@ if __name__ == "__main__":
         elif choice == '3':
             pkg = input('要卸载的库名: ').strip()
             if pkg:
-                pip_uninstall(pkg)
+                remove_deps = input('是否一键清除该包的孤立依赖? (y/n): ').strip().lower() == 'y'
+                if remove_deps:
+                    pip_uninstall_with_deps(pkg, auto_remove=True)
+                else:
+                    pip_uninstall(pkg)
         elif choice == '4':
             pkg = input('要升级的库名（留空升级pip本身）: ').strip()
             if pkg:
