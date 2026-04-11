@@ -33,6 +33,7 @@ def timer(unit='ms'):
 
 pip_path = None
 
+#函数定义区
 def run(command, timeout=300):
     try:
         res = sub.run(command, check=True, capture_output=True, timeout=timeout, encoding="utf-8", shell=True)
@@ -121,7 +122,22 @@ def pip_uninstall_with_deps(pkg, auto_remove=False):
                 dependents[dep].add(name)
 
     keep = {'pip', 'setuptools', 'wheel'}
-    orphan_deps = [dep for dep in deps if dep in dependents and not dependents[dep] and dep.lower() not in keep]
+    remove_set = {pkg}
+    queue = [dep for dep in deps if dep in dependents and dep.lower() not in keep]
+    orphan_deps = []
+
+    while queue:
+        dep = queue.pop()
+        if dep in remove_set or dep.lower() in keep:
+            continue
+        other_dependents = dependents.get(dep, set()) - remove_set
+        if not other_dependents:
+            remove_set.add(dep)
+            orphan_deps.append(dep)
+            for subdep in requires.get(dep, []):
+                if subdep in dependents and subdep.lower() not in keep:
+                    queue.append(subdep)
+
     if not orphan_deps:
         return
 
@@ -144,6 +160,38 @@ def pip_uninstall_with_deps(pkg, auto_remove=False):
     print('依赖库卸载完成')
 
 
+def pip_cleanup_unused_deps():
+    packages = pip_installed_packages()
+    if not packages:
+        print('未检测到已安装包')
+        return
+
+    requires = {pkg: pip_requires(pkg) for pkg in packages}
+    dependents = {pkg: set() for pkg in packages}
+    for pkg, deps in requires.items():
+        for dep in deps:
+            if dep in dependents:
+                dependents[dep].add(pkg)
+
+    keep = {'pip', 'setuptools', 'wheel'}
+    unused = [pkg for pkg, childs in dependents.items() if not childs and pkg.lower() not in keep]
+    if not unused:
+        print('未检测到当前无用依赖')
+        return
+
+    print('检测到当前可删除的无用依赖：')
+    for pkg in unused:
+        print(' -', pkg)
+    confirm = input('是否卸载这些包? (y/n): ').strip().lower()
+    if confirm != 'y':
+        print('取消卸载')
+        return
+
+    print('正在卸载...')
+    pip_uninstall(' '.join(unused))
+    print('无用依赖已卸载')
+
+#主程序入口
 if __name__ == "__main__":
 
     # 检测系统环境变量 PATH
@@ -250,13 +298,18 @@ if __name__ == "__main__":
             if pkg:
                 pip_install(pkg)
         elif choice == '3':
-            pkg = input('要卸载的库名: ').strip()
-            if pkg:
-                remove_deps = input('是否一键清除该包的孤立依赖? (y/n): ').strip().lower() == 'y'
-                if remove_deps:
-                    pip_uninstall_with_deps(pkg, auto_remove=True)
-                else:
+            print('\n=== 卸载选项 ===')
+            print('1. 卸载库')
+            print('2. 清除当前无用依赖')
+            sub_choice = input('请选择操作: ').strip()
+            if sub_choice == '1':
+                pkg = input('要卸载的库名: ').strip()
+                if pkg:
                     pip_uninstall(pkg)
+            elif sub_choice == '2':
+                pip_cleanup_unused_deps()
+            else:
+                print('无效选项')
         elif choice == '4':
             pkg = input('要升级的库名（留空升级pip本身）: ').strip()
             if pkg:
