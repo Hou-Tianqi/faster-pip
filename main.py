@@ -2,6 +2,7 @@ import subprocess as sub
 from functools import wraps
 import time
 import os
+import sys
 
 
 def timer(unit='ms'):
@@ -44,7 +45,7 @@ def run(command, timeout=300):
 
 
 def pip_run(sub_cmd):
-    cmd = f'"{pip_path}" {sub_cmd}' if pip_path else f"python -m pip {sub_cmd}"
+    cmd = f'"{pip_path}" {sub_cmd}' if pip_path else f'"{sys.executable}" -m pip {sub_cmd}'
     # pip 安装可能较慢，默认给大些时间
     return run(cmd, timeout=600)
 
