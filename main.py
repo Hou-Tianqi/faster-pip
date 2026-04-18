@@ -3,6 +3,9 @@ from functools import wraps
 import time
 import os
 import sys
+import platform
+import shutil
+import shlex
 
 
 def timer(unit='ms'):
@@ -35,17 +38,34 @@ def timer(unit='ms'):
 pip_path = None
 
 #函数定义区
+def is_windows():
+    return platform.system().lower() == 'windows'
+
+
 def run(command, timeout=300):
     try:
-        res = sub.run(command, check=True, capture_output=True, timeout=timeout, encoding="utf-8", shell=True)
+        if isinstance(command, str):
+            res = sub.run(command, check=True, capture_output=True, timeout=timeout, encoding="utf-8", shell=True)
+        else:
+            res = sub.run(command, check=True, capture_output=True, timeout=timeout, encoding="utf-8", shell=False)
         return res.stdout
     except sub.TimeoutExpired:
         print(f"命令超时（{timeout}s）：{command}")
         raise
 
 
+def find_all_executables(name):
+    if is_windows():
+        return run(["where", name]).strip().splitlines()
+    return run(["which", "-a", name]).strip().splitlines()
+
+
 def pip_run(sub_cmd):
-    cmd = f'"{pip_path}" {sub_cmd}' if pip_path else f'"{sys.executable}" -m pip {sub_cmd}'
+    args = shlex.split(sub_cmd)
+    if pip_path:
+        cmd = [pip_path] + args
+    else:
+        cmd = [sys.executable, "-m", "pip"] + args
     # pip 安装可能较慢，默认给大些时间
     return run(cmd, timeout=600)
 
@@ -355,53 +375,74 @@ if __name__ == "__main__":
 
     # 检测系统环境变量 PATH
     path_str = os.environ.get('PATH', '')
-    path_dirs = [p.strip() for p in path_str.split(';') if p.strip()]
-    has_python_in_path = any('python' in p.lower() for p in path_dirs)
-    has_pip_in_path = any('scripts' in p.lower() for p in path_dirs)
+    path_dirs = [p.strip() for p in path_str.split(os.pathsep) if p.strip()]
+    python_candidates = ['python']
+    pip_candidates = ['pip']
+    if not is_windows():
+        python_candidates.insert(0, 'python3')
+        pip_candidates.append('pip3')
+
+    has_python_in_path = any(shutil.which(cmd) for cmd in python_candidates)
+    has_pip_in_path = any(shutil.which(cmd) for cmd in pip_candidates)
 
     if not has_python_in_path:
         print("PATH 中未找到 Python")
         try:
-            py_paths = run("where python").strip().split("\n")
+            py_paths = find_all_executables('python')
+            if not py_paths and not is_windows():
+                py_paths = find_all_executables('python3')
             if py_paths and py_paths[0].strip():
                 py_path = py_paths[0].strip()
                 print(f"找到 Python 路径: {py_path}")
                 add_py = input("是否添加此路径到 PATH? (y/n): ").strip().lower()
                 if add_py == 'y':
                     py_dir = os.path.dirname(py_path)
-                    try:
-                        sub.run(f'setx PATH "%PATH%;{py_dir}"', shell=True, check=True)
-                        print("已添加 Python 到 PATH，请重启终端以生效")
-                    except sub.CalledProcessError:
-                        print("添加失败，请手动添加或以管理员身份运行")
+                    if is_windows():
+                        try:
+                            sub.run(f'setx PATH "%PATH%;{py_dir}"', shell=True, check=True)
+                            print("已添加 Python 到 PATH，请重启终端以生效")
+                        except sub.CalledProcessError:
+                            print("添加失败，请手动添加或以管理员身份运行")
+                    else:
+                        print(f"请手动将以下路径添加到 PATH: {py_dir}")
         except Exception:
             print("未找到 Python 可执行文件")
 
     if not has_pip_in_path:
         print("PATH 中未找到 pip")
         try:
-            pip_paths = run("where pip").strip().split("\n")
+            pip_paths = find_all_executables('pip')
+            if not pip_paths and not is_windows():
+                pip_paths = find_all_executables('pip3')
             if pip_paths and pip_paths[0].strip():
                 pip_path_found = pip_paths[0].strip()
                 print(f"找到 pip 路径: {pip_path_found}")
                 add_pip = input("是否添加此路径到 PATH? (y/n): ").strip().lower()
                 if add_pip == 'y':
                     pip_dir = os.path.dirname(pip_path_found)
-                    try:
-                        sub.run(f'setx PATH "%PATH%;{pip_dir}"', shell=True, check=True)
-                        print("已添加 pip 到 PATH，请重启终端以生效")
-                    except sub.CalledProcessError:
-                        print("添加失败，请手动添加或以管理员身份运行")
+                    if is_windows():
+                        try:
+                            sub.run(f'setx PATH "%PATH%;{pip_dir}"', shell=True, check=True)
+                            print("已添加 pip 到 PATH，请重启终端以生效")
+                        except sub.CalledProcessError:
+                            print("添加失败，请手动添加或以管理员身份运行")
+                    else:
+                        print(f"请手动将以下路径添加到 PATH: {pip_dir}")
         except Exception:
             print("未找到 pip 可执行文件")
 
-    wh_py = run("where python").strip().split("\n")
-    wh_pip = run("where pip").strip().split("\n")
-    path = run("echo %PATH%").strip().split(";")
+    wh_py = find_all_executables('python')
+    if not wh_py and not is_windows():
+        wh_py = find_all_executables('python3')
+    wh_pip = find_all_executables('pip')
+    if not wh_pip and not is_windows():
+        wh_pip = find_all_executables('pip3')
+    path = path_dirs
 
     if len(wh_py) == 1:
         print("发现1个Python版本")
         print(f"版本号：{run(str(wh_py[0])+' --version').strip()}")
+        print('路径：',wh_py[0])
     elif len(wh_py) == 0:
         print("OoO? 未发现Python")
     else:
