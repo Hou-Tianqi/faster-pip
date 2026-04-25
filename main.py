@@ -125,62 +125,6 @@ def pip_requires(pkg):
     return []
 
 
-def pip_uninstall_with_deps(pkg, auto_remove=False):
-    deps = pip_requires(pkg)
-    pip_uninstall(pkg)
-    if not deps:
-        return
-
-    packages = pip_installed_packages()
-    if not packages:
-        return
-
-    requires = {name: pip_requires(name) for name in packages}
-    dependents = {name: set() for name in packages}
-    for name, subdeps in requires.items():
-        for dep in subdeps:
-            if dep in dependents:
-                dependents[dep].add(name)
-
-    keep = {'pip', 'setuptools', 'wheel'}
-    remove_set = {pkg}
-    queue = [dep for dep in deps if dep in dependents and dep.lower() not in keep]
-    orphan_deps = []
-
-    while queue:
-        dep = queue.pop()
-        if dep in remove_set or dep.lower() in keep:
-            continue
-        other_dependents = dependents.get(dep, set()) - remove_set
-        if not other_dependents:
-            remove_set.add(dep)
-            orphan_deps.append(dep)
-            for subdep in requires.get(dep, []):
-                if subdep in dependents and subdep.lower() not in keep:
-                    queue.append(subdep)
-
-    if not orphan_deps:
-        return
-
-    print('检测到以下依赖库在卸载目标后未被其他包依赖：')
-    for dep in orphan_deps:
-        print(' -', dep)
-    if auto_remove:
-        print('正在卸载依赖库...')
-        pip_uninstall(' '.join(orphan_deps))
-        print('依赖库卸载完成')
-        return
-
-    confirm = input('是否同时卸载这些依赖库? (y/n): ').strip().lower()
-    if confirm != 'y':
-        print('保留依赖库')
-        return
-
-    print('正在卸载依赖库...')
-    pip_uninstall(' '.join(orphan_deps))
-    print('依赖库卸载完成')
-
-
 def pip_cleanup_unused_deps():
     packages = pip_installed_packages()
     if not packages:
@@ -370,6 +314,35 @@ def batch_uninstall_menu():
         else:
             print("无效选项，请重新输入")
 
+def set_pip_source(source_url="https://pypi.tuna.tsinghua.edu.cn/simple"):
+    """配置 pip 下载源"""
+    try:
+        sub.check_call(
+            [sys.executable, "-m", "pip", "config", "set", "global.index-url", source_url]
+        )
+    except sub.CalledProcessError:
+        pass
+
+def setup_venv(venv_name="my_env", use_mirror=True):
+    """检查环境、创建虚拟环境并安装依赖"""
+    if use_mirror:
+        set_pip_source()
+
+    venv_dir = os.path.join(os.getcwd(), venv_name)
+    if platform.system() == "Windows":
+        venv_python = os.path.join(venv_dir, "Scripts", "python.exe")
+    else:
+        venv_python = os.path.join(venv_dir, "bin", "python")
+
+    if not os.path.exists(venv_python):
+        sub.check_call([sys.executable, "-m", "venv", venv_name])
+
+    req_file = os.path.join(os.getcwd(), "requirements.txt")
+    if os.path.exists(req_file):
+        sub.check_call([venv_python, "-m", "pip", "install", "-r", req_file])
+    
+    return venv_python
+
 #主程序入口
 if __name__ == "__main__":
 
@@ -488,7 +461,9 @@ if __name__ == "__main__":
         print('3. 卸载库')
         print('4. 升级库')
         print('5. 查找库')
-        print('6. 退出')
+        print('6. 切换 pip 下载源')
+        print('7. 创建/更新虚拟环境')
+        print('8. 退出')
 
         choice = input('请输入选项数字: ').strip()
         if choice == '1':
@@ -523,6 +498,18 @@ if __name__ == "__main__":
             pkg = input('要查找的库名: ').strip()
             pip_find(pkg)
         elif choice == '6':
+            source_url = input('请输入 pip 源地址 (回车使用默认清华镜像): ').strip()
+            if source_url:
+                set_pip_source(source_url)
+            else:
+                set_pip_source()
+            print('pip 下载源已配置完成\n删除刚才输出的配置文件以恢复默认源')
+        elif choice == '7':
+            venv_name = input('请输入虚拟环境名称 (默认 my_env): ').strip() or 'my_env'
+            use_mirror = input('是否使用镜像源安装依赖? (y/n, 默认 y): ').strip().lower()
+            setup_venv(venv_name, use_mirror != 'n')
+            print(f'虚拟环境已创建/准备完成: {venv_name}')
+        elif choice == '8':
             print('退出pip管理')
             break
         else:
