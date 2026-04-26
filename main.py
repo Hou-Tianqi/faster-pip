@@ -36,6 +36,8 @@ def timer(unit='ms'):
 
 
 pip_path = None
+current_venv = None  # 当前虚拟环境路径
+
 
 #函数定义区
 def is_windows():
@@ -60,6 +62,66 @@ def find_all_executables(name):
     return run(["which", "-a", name]).strip().splitlines()
 
 
+def find_global_pip():
+    """查找全局pip路径"""
+    pip_candidates = ['pip', 'pip3'] if not is_windows() else ['pip']
+    for cmd in pip_candidates:
+        path = shutil.which(cmd)
+        if path:
+            return path
+    return None
+
+
+def detect_current_env():
+    """自动检测当前是否在虚拟环境中"""
+    # 方法1：检查 sys.prefix 和 sys.base_prefix
+    if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+        return sys.prefix
+    
+    # 方法2：检查环境变量 VIRTUAL_ENV
+    venv_path = os.environ.get('VIRTUAL_ENV')
+    if venv_path:
+        return venv_path
+    
+    return None  # 不在虚拟环境中
+
+
+def use_venv(venv_path=None):
+    """切换到虚拟环境，venv_path=None 表示切换回全局"""
+    global pip_path, current_venv
+    
+    if venv_path:
+        # 规范化路径
+        venv_path = os.path.abspath(venv_path)
+        
+        # 检查是否是有效的虚拟环境
+        if is_windows():
+            pip_exe = os.path.join(venv_path, "Scripts", "pip.exe")
+            python_exe = os.path.join(venv_path, "Scripts", "python.exe")
+        else:
+            pip_exe = os.path.join(venv_path, "bin", "pip")
+            python_exe = os.path.join(venv_path, "bin", "python")
+        
+        if not os.path.exists(pip_exe):
+            print(f"⚠️ {venv_path} 不是有效的虚拟环境（找不到pip）")
+            return False
+        
+        pip_path = pip_exe
+        current_venv = venv_path
+        print(f"✅ 已切换到虚拟环境: {venv_path}")
+        return True
+    else:
+        # 切换回全局
+        global_pip = find_global_pip()
+        if global_pip:
+            pip_path = global_pip
+        else:
+            pip_path = None
+        current_venv = None
+        print("✅ 已切换回全局环境")
+        return True
+
+
 def pip_run(sub_cmd):
     if isinstance(sub_cmd, list):
         args = sub_cmd
@@ -73,17 +135,22 @@ def pip_run(sub_cmd):
     # pip 安装可能较慢，默认给大些时间
     return run(cmd, timeout=600)
 
+
 def pip_list():
     print(pip_run('list'))
+
 
 def pip_install(pkg):
     print(pip_run(f"install {pkg}"))
 
+
 def pip_uninstall(pkg):
     print(pip_run(["uninstall", "-y"] + pkg.split()))
 
+
 def pip_upgrade(pkg):
     print(pip_run(f"install -U {pkg}"))
+
 
 def pip_find(pkg):
     if not pkg:
@@ -116,6 +183,7 @@ def pip_installed_packages():
             packages.append(line.split('==', 1)[0].strip())
     return packages
 
+
 def pip_requires(pkg):
     try:
         info = pip_run(f'show {pkg}')
@@ -140,6 +208,7 @@ def pip_requires(pkg):
                 clean_deps.append(dep.strip())
             return clean_deps
     return []
+
 
 def pip_cleanup_unused_deps():
     packages = pip_installed_packages()
@@ -172,6 +241,7 @@ def pip_cleanup_unused_deps():
     pip_uninstall(' '.join(unused))
     print('无用依赖已卸载')
 
+
 def get_installed_packages():
     """获取所有已安装的包列表"""
     try:
@@ -185,6 +255,7 @@ def get_installed_packages():
     except Exception as e:
         print(f"❌ 获取包列表失败: {e}")
         return []
+
 
 def uninstall_packages(package_names, auto_confirm=False):
     """卸载指定的包"""
@@ -206,6 +277,7 @@ def uninstall_packages(package_names, auto_confirm=False):
             failed.append(name)
     
     return {"success": success, "failed": failed}
+
 
 def interactive_uninstall(packages):
     """交互式卸载（支持多选）"""
@@ -240,6 +312,7 @@ def interactive_uninstall(packages):
         print("没有选择有效的包")
         return []
 
+
 def search_and_uninstall(packages, pattern):
     """按名称模式搜索并卸载"""
     matched = [p["name"] for p in packages if pattern.lower() in p["name"].lower()]
@@ -256,6 +329,7 @@ def search_and_uninstall(packages, pattern):
     if confirm == 'y':
         return matched
     return []
+
 
 def uninstall_from_file(filepath):
     """从文件读取要卸载的包列表"""
@@ -278,6 +352,7 @@ def uninstall_from_file(filepath):
     except Exception as e:
         print(f"❌ 读取文件失败: {e}")
         return []
+
 
 def batch_uninstall_menu():
     """批量卸载菜单"""
@@ -330,6 +405,7 @@ def batch_uninstall_menu():
         else:
             print("无效选项，请重新输入")
 
+
 def set_pip_source(source_url="https://pypi.tuna.tsinghua.edu.cn/simple"):
     """配置 pip 下载源"""
     try:
@@ -339,25 +415,123 @@ def set_pip_source(source_url="https://pypi.tuna.tsinghua.edu.cn/simple"):
     except sub.CalledProcessError:
         pass
 
+
 def setup_venv(venv_name="my_env", use_mirror=True):
     """检查环境、创建虚拟环境并安装依赖"""
-    if use_mirror:
-        set_pip_source()
-
     venv_dir = os.path.join(os.getcwd(), venv_name)
+    
+    # 获取虚拟环境中的路径
     if platform.system() == "Windows":
         venv_python = os.path.join(venv_dir, "Scripts", "python.exe")
+        venv_pip = os.path.join(venv_dir, "Scripts", "pip.exe")
     else:
         venv_python = os.path.join(venv_dir, "bin", "python")
+        venv_pip = os.path.join(venv_dir, "bin", "pip")
 
+    # 创建虚拟环境（如果不存在）
     if not os.path.exists(venv_python):
+        print(f"正在创建虚拟环境: {venv_name}")
         sub.check_call([sys.executable, "-m", "venv", venv_name])
+        print("虚拟环境创建完成")
+    else:
+        print(f"虚拟环境已存在: {venv_name}")
 
+    # 安装依赖
     req_file = os.path.join(os.getcwd(), "requirements.txt")
     if os.path.exists(req_file):
-        sub.check_call([venv_python, "-m", "pip", "install", "-r", req_file])
+        print("正在安装依赖...")
+        install_cmd = [venv_pip, "install", "-r", req_file]
+        if use_mirror:
+            install_cmd.extend(["-i", "https://pypi.tuna.tsinghua.edu.cn/simple"])
+        sub.check_call(install_cmd)
+        print("依赖安装完成")
+    else:
+        print("未找到 requirements.txt，跳过依赖安装")
+    
+    # 提示如何激活虚拟环境
+    print(f"\n✅ 虚拟环境准备完成: {venv_name}")
+    if platform.system() == "Windows":
+        print(f"激活命令: {venv_dir}\\Scripts\\activate")
+        print(f"退出命令: deactivate")
+    else:
+        print(f"激活命令: source {venv_dir}/bin/activate")
+        print(f"退出命令: deactivate")
+    
+    # 询问是否切换到该虚拟环境
+    switch = input(f"\n是否立即切换到虚拟环境 '{venv_name}'? (y/n): ").strip().lower()
+    if switch == 'y':
+        use_venv(venv_dir)
     
     return venv_python
+
+
+def list_venvs():
+    """列出当前目录下的所有虚拟环境"""
+    venvs = []
+    for item in os.listdir('.'):
+        item_path = os.path.join('.', item)
+        if os.path.isdir(item_path):
+            if is_windows():
+                if os.path.exists(os.path.join(item_path, "Scripts", "python.exe")):
+                    venvs.append(item)
+            else:
+                if os.path.exists(os.path.join(item_path, "bin", "python")):
+                    venvs.append(item)
+    return venvs
+
+
+def switch_env_menu():
+    """切换环境菜单"""
+    print("\n=== 切换环境 ===")
+    print("1. 使用全局环境")
+    print("2. 切换到虚拟环境（输入路径）")
+    print("3. 切换到已有虚拟环境（从列表选择）")
+    print("4. 查看当前环境")
+    print("5. 返回上级菜单")
+    
+    choice = input("请选择: ").strip()
+    
+    if choice == '1':
+        use_venv(None)
+    
+    elif choice == '2':
+        venv_path = input("请输入虚拟环境路径: ").strip()
+        if venv_path:
+            use_venv(venv_path)
+    
+    elif choice == '3':
+        venvs = list_venvs()
+        if not venvs:
+            print("当前目录下没有找到虚拟环境")
+            return
+        print("\n找到以下虚拟环境:")
+        for i, venv in enumerate(venvs, 1):
+            print(f"  {i}. {venv}")
+        try:
+            idx = int(input("请选择序号: ").strip()) - 1
+            if 0 <= idx < len(venvs):
+                venv_path = os.path.abspath(venvs[idx])
+                use_venv(venv_path)
+            else:
+                print("无效序号")
+        except ValueError:
+            print("输入无效")
+    
+    elif choice == '4':
+        if current_venv:
+            print(f"当前环境: 虚拟环境 [{current_venv}]")
+            print(f"pip路径: {pip_path}")
+        else:
+            print("当前环境: 全局环境")
+            if pip_path:
+                print(f"pip路径: {pip_path}")
+    
+    elif choice == '5':
+        return
+    
+    else:
+        print("无效选项")
+
 
 #主程序入口
 if __name__ == "__main__":
@@ -470,8 +644,23 @@ if __name__ == "__main__":
             print('输入无效，采用第一个pip')
             pip_path = wh_pip[0]
 
+    # 自动检测虚拟环境
+    detected_venv = detect_current_env()
+    if detected_venv:
+        print(f"\n🔍 检测到已激活的虚拟环境: {detected_venv}")
+        use_venv(detected_venv)
+    else:
+        print("\n当前使用全局环境")
+
     while True:
-        print('\n=== pip库管理 ===')
+        # 显示当前环境状态
+        if current_venv:
+            env_status = f" [虚拟环境: {os.path.basename(current_venv)}]"
+        else:
+            env_status = " [全局环境]"
+        
+        print(f'\n=== pip库管理{env_status} ===')
+        print('0. 切换环境')
         print('1. 列出已安装库')
         print('2. 安装库')
         print('3. 卸载库')
@@ -482,12 +671,18 @@ if __name__ == "__main__":
         print('8. 退出')
 
         choice = input('请输入选项数字: ').strip()
-        if choice == '1':
+        
+        if choice == '0':
+            switch_env_menu()
+        
+        elif choice == '1':
             pip_list()
+        
         elif choice == '2':
             pkg = input('要安装的库名: ').strip()
             if pkg:
                 pip_install(pkg)
+        
         elif choice == '3':
             print('\n=== 卸载选项 ===')
             print('1. 卸载库')
@@ -504,15 +699,18 @@ if __name__ == "__main__":
                 batch_uninstall_menu()
             else:
                 print('无效选项')
+        
         elif choice == '4':
             pkg = input('要升级的库名（留空升级pip本身）: ').strip()
             if pkg:
                 pip_upgrade(pkg)
             else:
                 pip_upgrade('pip')
+        
         elif choice == '5':
             pkg = input('要查找的库名: ').strip()
             pip_find(pkg)
+        
         elif choice == '6':
             source_url = input('请输入 pip 源地址 (回车使用默认清华镜像): ').strip()
             if source_url:
@@ -520,14 +718,15 @@ if __name__ == "__main__":
             else:
                 set_pip_source()
             print('pip 下载源已配置完成\n删除刚才输出的配置文件以恢复默认源')
+        
         elif choice == '7':
             venv_name = input('请输入虚拟环境名称 (默认 my_env): ').strip() or 'my_env'
             use_mirror = input('是否使用镜像源安装依赖? (y/n, 默认 y): ').strip().lower()
             setup_venv(venv_name, use_mirror != 'n')
-            print(f'虚拟环境已创建/准备完成: {venv_name}')
+        
         elif choice == '8':
             print('退出pip管理')
             break
+        
         else:
             print('无效选项')
-    
