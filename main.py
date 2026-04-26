@@ -61,7 +61,11 @@ def find_all_executables(name):
 
 
 def pip_run(sub_cmd):
-    args = shlex.split(sub_cmd)
+    if isinstance(sub_cmd, list):
+        args = sub_cmd
+    else:
+        args = shlex.split(sub_cmd)
+    
     if pip_path:
         cmd = [pip_path] + args
     else:
@@ -76,7 +80,7 @@ def pip_install(pkg):
     print(pip_run(f"install {pkg}"))
 
 def pip_uninstall(pkg):
-    print(pip_run(f"uninstall -y {pkg}"))
+    print(pip_run(["uninstall", "-y"] + pkg.split()))
 
 def pip_upgrade(pkg):
     print(pip_run(f"install -U {pkg}"))
@@ -112,7 +116,6 @@ def pip_installed_packages():
             packages.append(line.split('==', 1)[0].strip())
     return packages
 
-
 def pip_requires(pkg):
     try:
         info = pip_run(f'show {pkg}')
@@ -121,9 +124,22 @@ def pip_requires(pkg):
     for line in info.splitlines():
         if line.startswith('Requires:'):
             deps = line.split(':', 1)[1].strip()
-            return [dep.split(' ')[0].strip() for dep in deps.split(',') if dep.strip()]
+            if not deps:
+                return []
+            clean_deps = []
+            for dep in deps.split(','):
+                dep = dep.strip()
+                # 去除版本号：>=, <=, >, <, ==, ~=, !=
+                for sep in ['>=', '<=', '>', '<', '==', '~=', '!=']:
+                    if sep in dep:
+                        dep = dep.split(sep)[0]
+                        break
+                # 去除 [extra] 标记
+                if '[' in dep:
+                    dep = dep.split('[')[0]
+                clean_deps.append(dep.strip())
+            return clean_deps
     return []
-
 
 def pip_cleanup_unused_deps():
     packages = pip_installed_packages()
