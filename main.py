@@ -46,26 +46,55 @@ def is_windows():
 
 def run(command, timeout=300):
     try:
+        # 统一使用列表形式，避免 shell=True 的安全风险
         if isinstance(command, str):
-            res = sub.run(command, check=True, capture_output=True, timeout=timeout, encoding="utf-8", shell=True)
-        else:
-            res = sub.run(command, check=True, capture_output=True, timeout=timeout, encoding="utf-8", shell=False)
-        return res.stdout
+            command = shlex.split(command)
+        # 不指定 encoding，让 subprocess 自动处理字节流
+        res = sub.run(command, check=True, capture_output=True, timeout=timeout, shell=False)
+        
+        # 尝试多种编码解码输出
+        output = None
+        for encoding in ['utf-8', 'gbk', 'gb2312', 'latin-1']:
+            try:
+                output = res.stdout.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        
+        # 如果所有编码都失败，使用 replace 模式忽略错误字符
+        if output is None:
+            output = res.stdout.decode('latin-1', errors='replace')
+        
+        return output
     except sub.TimeoutExpired:
         print(f"命令超时（{timeout}s）：{command}")
         raise
+    except sub.CalledProcessError:
+        # 命令执行失败（比如找不到命令），返回空字符串
+        return ""
 
 
 def find_all_executables(name):
     if is_windows():
-        return run(["where", name]).strip().splitlines()
-    return run(["which", "-a", name]).strip().splitlines()
+        result = run(["where", name])
+        if not result:  # 处理 None 或空字符串
+            return []
+        return [line.strip() for line in result.strip().splitlines() if line.strip()]
+    result = run(["which", "-a", name])
+    if not result:
+        return []
+    return [line.strip() for line in result.strip().splitlines() if line.strip()]
 
 
 def find_global_pip():
     """查找全局pip路径"""
     pip_candidates = ['pip', 'pip3'] if not is_windows() else ['pip']
     for cmd in pip_candidates:
+        # 优先使用 find_all_executables
+        paths = find_all_executables(cmd)
+        if paths and paths[0].strip():
+            return paths[0].strip()
+        # 降级使用 shutil.which
         path = shutil.which(cmd)
         if path:
             return path
@@ -74,16 +103,16 @@ def find_global_pip():
 
 def detect_current_env():
     """自动检测当前是否在虚拟环境中"""
-    # 方法1：检查 sys.prefix 和 sys.base_prefix
-    if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+    # Python 3.3+ 标准方法（兼容 Python 3.11+）
+    if hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix:
         return sys.prefix
     
-    # 方法2：检查环境变量 VIRTUAL_ENV
+    # 检查环境变量 VIRTUAL_ENV
     venv_path = os.environ.get('VIRTUAL_ENV')
     if venv_path:
         return venv_path
     
-    return None  # 不在虚拟环境中
+    return None
 
 
 def use_venv(venv_path=None):
@@ -128,9 +157,11 @@ def pip_run(sub_cmd):
     else:
         args = shlex.split(sub_cmd)
     
-    if pip_path:
+    # 修复：检查 pip_path 是否有效
+    if pip_path and os.path.exists(pip_path):
         cmd = [pip_path] + args
     else:
+        # 降级使用 python -m pip
         cmd = [sys.executable, "-m", "pip"] + args
     # pip 安装可能较慢，默认给大些时间
     return run(cmd, timeout=600)
@@ -141,14 +172,23 @@ def pip_list():
 
 
 def pip_install(pkg):
+    if not pkg or not pkg.strip():
+        print("⚠️ 未指定要安装的包")
+        return
     print(pip_run(f"install {pkg}"))
 
 
 def pip_uninstall(pkg):
+    if not pkg or not pkg.strip():
+        print("⚠️ 未指定要卸载的包")
+        return
     print(pip_run(["uninstall", "-y"] + pkg.split()))
 
 
 def pip_upgrade(pkg):
+    if not pkg or not pkg.strip():
+        print("⚠️ 未指定要升级的包")
+        return
     print(pip_run(f"install -U {pkg}"))
 
 
@@ -412,8 +452,9 @@ def set_pip_source(source_url="https://pypi.tuna.tsinghua.edu.cn/simple"):
         sub.check_call(
             [sys.executable, "-m", "pip", "config", "set", "global.index-url", source_url]
         )
+        print(f"✅ pip 下载源已设置为: {source_url}")
     except sub.CalledProcessError:
-        pass
+        print("❌ 设置 pip 下载源失败")
 
 
 def setup_venv(venv_name="my_env", use_mirror=True):
@@ -432,7 +473,7 @@ def setup_venv(venv_name="my_env", use_mirror=True):
     if not os.path.exists(venv_python):
         print(f"正在创建虚拟环境: {venv_name}")
         sub.check_call([sys.executable, "-m", "venv", venv_name])
-        print("虚拟环境创建完成")
+        print("✅ 虚拟环境创建完成")
     else:
         print(f"虚拟环境已存在: {venv_name}")
 
@@ -442,9 +483,11 @@ def setup_venv(venv_name="my_env", use_mirror=True):
         print("正在安装依赖...")
         install_cmd = [venv_pip, "install", "-r", req_file]
         if use_mirror:
-            install_cmd.extend(["-i", "https://pypi.tuna.tsinghua.edu.cn/simple"])
+            mirror_url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+            install_cmd.extend(["-i", mirror_url])
+            print(f"使用镜像源: {mirror_url}")
         sub.check_call(install_cmd)
-        print("依赖安装完成")
+        print("✅ 依赖安装完成")
     else:
         print("未找到 requirements.txt，跳过依赖安装")
     
@@ -531,6 +574,17 @@ def switch_env_menu():
     
     else:
         print("无效选项")
+
+
+def export_requirements(output_file="requirements.txt"):
+    """导出当前环境的包列表到 requirements.txt"""
+    try:
+        output = pip_run('freeze')
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(output)
+        print(f"✅ 已导出包列表到: {output_file}")
+    except Exception as e:
+        print(f"❌ 导出失败: {e}")
 
 
 #主程序入口
@@ -668,7 +722,8 @@ if __name__ == "__main__":
         print('5. 查找库')
         print('6. 切换 pip 下载源')
         print('7. 创建/更新虚拟环境')
-        print('8. 退出')
+        print('8. 导出 requirements.txt')
+        print('9. 退出')
 
         choice = input('请输入选项数字: ').strip()
         
@@ -717,7 +772,6 @@ if __name__ == "__main__":
                 set_pip_source(source_url)
             else:
                 set_pip_source()
-            print('pip 下载源已配置完成\n删除刚才输出的配置文件以恢复默认源')
         
         elif choice == '7':
             venv_name = input('请输入虚拟环境名称 (默认 my_env): ').strip() or 'my_env'
@@ -725,6 +779,9 @@ if __name__ == "__main__":
             setup_venv(venv_name, use_mirror != 'n')
         
         elif choice == '8':
+            export_requirements()
+        
+        elif choice == '9':
             print('退出pip管理')
             break
         
